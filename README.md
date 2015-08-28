@@ -1,2 +1,2 @@
 # dcel
-Double-connected edge list data structure in Go
+Doubly-connected edge list data structure in Go
