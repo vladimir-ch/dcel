@@ -1,13 +1,20 @@
 package dcel
 
-import "fmt"
+import (
+	"fmt"
 
-// var (
-// 	dcelGraph *Graph
-// 	_         graph.Graph = dcelGraph
-// )
+	"github.com/gonum/graph"
+)
 
+var (
+	dcelGraph *Graph
+	_         graph.Undirected = dcelGraph
+)
+
+// Graph implements the doubly-connected edge list data structure.
 type Graph struct {
+	items Items
+
 	nodes map[int]Node
 	edges map[int]Edge
 	faces map[int]Face
@@ -21,8 +28,14 @@ type Graph struct {
 	freeFaces map[int]struct{}
 }
 
-func NewGraph() *Graph {
+// New returns a new Graph. If items is nil, Base will be used.
+func New(items Items) *Graph {
+	if items == nil {
+		items = Base{}
+	}
 	return &Graph{
+		items: items,
+
 		nodes: make(map[int]Node),
 		edges: make(map[int]Edge),
 		faces: make(map[int]Face),
@@ -33,34 +46,55 @@ func NewGraph() *Graph {
 	}
 }
 
+// Node returns the node with the given id or nil if it does not exist within
+// the graph.
 func (g *Graph) Node(id int) Node { return g.nodes[id] }
-func (g *Graph) Edge(id int) Edge { return g.edges[id] }
+
+// Face returns the face with the given id or nil if it does not exist within
+// the graph.
 func (g *Graph) Face(id int) Face { return g.faces[id] }
 
+// Edge returns the edge with the given id or nil if it does not exist within
+// the graph.
+// func (g *Graph) Edge(id int) Edge { return g.edges[id] }
+
+// Has returns whether the node n exists within the graph.
+func (g *Graph) Has(x graph.Node) bool {
+	return g.has(x.ID())
+}
+
+// has returns whether a node with the given id exists within the graph.
 func (g *Graph) has(id int) bool {
 	_, exists := g.nodes[id]
 	return exists
 }
-func (g *Graph) Has(n Node) bool { return g.has(n.ID()) }
 
-func (g *Graph) Nodes() []Node {
-	var nodes []Node
-	for _, n := range g.nodes {
-		nodes = append(nodes, n)
+// Nodes returns all the nodes in the graph.
+func (g *Graph) Nodes() []graph.Node {
+	var nodes []graph.Node
+	for _, u := range g.nodes {
+		nodes = append(nodes, u)
 	}
 	return nodes
 }
 
-func (g *Graph) From(n Node) []Node {
-	start := n.Halfedge()
-	if start == nil {
-		// Node n is isolated.
+// From returns all neighbors of the node x.
+func (g *Graph) From(x graph.Node) []graph.Node {
+	u := g.Node(x.ID())
+	if u == nil {
 		return nil
 	}
-	var from []Node
+	if u.Halfedge() == nil {
+		// Node n is isolated, so there are no neighbors.
+		return nil
+	}
+	var (
+		from  []graph.Node
+		start = u.Halfedge().Twin() // An incoming halfedge to u.
+	)
 	for iter := start; ; {
-		from = append(from, iter.Twin().From())
-		iter = iter.Twin().Next()
+		from = append(from, iter.From())
+		iter = iter.Next().Twin()
 		if iter == start {
 			break
 		}
@@ -68,68 +102,19 @@ func (g *Graph) From(n Node) []Node {
 	return from
 }
 
-func (g *Graph) Halfedge(x, y Node) Halfedge {
-	if !g.Has(x) || !g.Has(y) {
-		// At least one of the nodes does not belong to the graph.
-		return nil
-	}
-	if x.Halfedge() == nil || y.Halfedge() == nil {
-		// At least one of the nodes is isolated.
-		return nil
-	}
-	start := x.Halfedge()
-	for iter := start; ; {
-		if iter.Twin().From().ID() == y.ID() {
-			return iter
-		}
-		iter = iter.Twin().Next()
-		if iter == start {
-			break
-		}
-	}
-	return nil
+// HasEdge returns whether an edge exists between nodes x and y.
+func (g *Graph) HasEdge(x, y graph.Node) bool {
+	return g.Halfedge(x, y) != nil
 }
 
-func (g *Graph) HalfedgesFrom(x Node) []Halfedge {
-	if !g.Has(x) {
-		return nil
-	}
-	if x.Halfedge() == nil {
-		return nil
-	}
-	var hes []Halfedge
-	for iter := x.Halfedge(); ; {
-		hes = append(hes, iter)
-		iter = iter.Twin().Next()
-		if iter == x.Halfedge() {
-			break
-		}
-	}
-	return hes
+// Edge returns the edge between x and y or nil if the nodes are not connected.
+func (g *Graph) Edge(x, y graph.Node) graph.Edge {
+	return g.EdgeBetween(x, y)
 }
 
-func (g *Graph) hasEdge(id int) bool {
-	_, exists := g.edges[id]
-	return exists
-}
-
-func (g *Graph) HasEdge(e Edge) bool {
-	return g.hasEdge(e.ID())
-}
-
-// func (g *Graph) HasEdge(x, y Node) bool {
-// 	return g.Halfedge(x, y) != nil
-// }
-//
-// func (g *Graph) Edge(u, v Node) Edge {
-// 	he := g.Halfedge(u, v)
-// 	if he == nil {
-// 		return nil
-// 	}
-// 	return he.Edge()
-// }
-
-func (g *Graph) EdgeBetween(x, y Node) Edge {
+// EdgeBetween returns the edge between x and y or nil if the nodes are not
+// connected.
+func (g *Graph) EdgeBetween(x, y graph.Node) graph.Edge {
 	he := g.Halfedge(x, y)
 	if he == nil {
 		return nil
@@ -137,6 +122,34 @@ func (g *Graph) EdgeBetween(x, y Node) Edge {
 	return he.Edge()
 }
 
+// Halfedge returns the halfedge from x to y, or nil if the nodes are not
+// connected by an edge or at least one is isolated.
+func (g *Graph) Halfedge(x, y graph.Node) Halfedge {
+	u := g.Node(x.ID())
+	v := g.Node(y.ID())
+	if u == nil || v == nil {
+		// One of the nodes does not belong to the graph.
+		return nil
+	}
+	if u.Halfedge() == nil || v.Halfedge() == nil {
+		// At least one of the nodes is isolated.
+		return nil
+	}
+	start := u.Halfedge() // An outgoing halfedge from u.
+	for iter := start; ; {
+		if iter.Twin().From() == v {
+			return iter
+		}
+		iter = iter.Twin().Next()
+		if iter == start {
+			break
+		}
+	}
+	// If we get here, the nodes are not connected.
+	return nil
+}
+
+// NewNodeID returns a new node id unique within the graph.
 func (g *Graph) NewNodeID() int {
 	if g.nextNodeID != maxInt {
 		id := g.nextNodeID
@@ -161,113 +174,108 @@ func (g *Graph) NewNodeID() int {
 	panic("dcel: no free node ID")
 }
 
-func (g *Graph) NewEdgeID() int {
-	if g.nextEdgeID != maxInt {
-		id := g.nextEdgeID
-		g.nextEdgeID++
-		return id
+// AddNode adds a new, isolated node to the graph with ID given by x.ID(). It
+// panics if a node with this ID already exists in the graph.
+func (g *Graph) AddNode(x graph.Node) {
+	id := x.ID()
+	if g.has(id) {
+		panic(fmt.Sprintf("dcel: node ID collision: %d", id))
 	}
-	// All edge IDs have already been used. See if at least one has been
-	// released.
-	for id := range g.freeEdges {
-		return id
-	}
-	if len(g.edges) == maxInt {
-		panic("dcel: graph too large")
-	}
-	// Resort to checking all positive integers to see if there is at least one
-	// unused.
-	for id := 0; id < maxInt; id++ {
-		if _, exists := g.edges[id]; !exists {
-			return id
-		}
-	}
-	panic("dcel: no free edge ID")
+
+	g.nodes[id] = g.items.NewNode(id)
+	delete(g.freeNodes, id)
+	g.nextNodeID = max(g.nextNodeID, id)
 }
 
-func (g *Graph) NewFaceID() int {
-	if g.nextFaceID != maxInt {
-		id := g.nextFaceID
-		g.nextFaceID++
-		return id
-	}
-	// All face IDs have already been used. See if at least one has been
-	// released.
-	for id := range g.freeFaces {
-		return id
-	}
-	if len(g.faces) == maxInt {
-		panic("dcel: graph too large")
-	}
-	// Resort to checking all positive integers to see if there is at least one
-	// unused.
-	for id := 0; id < maxInt; id++ {
-		if _, exists := g.faces[id]; !exists {
-			return id
-		}
-	}
-	panic("dcel: no free face ID")
-}
-
-func (g *Graph) AddNode(n Node) {
-	if g.Has(n) {
-		panic(fmt.Sprintf("dcel: node ID collision: %d", n.ID()))
-	}
-
-	g.nodes[n.ID()] = n
-	delete(g.freeNodes, n.ID())
-	g.nextNodeID = max(g.nextNodeID, n.ID())
-}
-
-func (g *Graph) RemoveNode(n Node) {
-	if !g.Has(n) {
+// RemoveNode removes the node with ID given by x.ID() from the graph as well
+// as any edges attached to it.
+func (g *Graph) RemoveNode(x graph.Node) {
+	id := x.ID()
+	if !g.has(id) {
+		// Nothing to do.
 		return
 	}
-
-	for _, h := range g.HalfedgesFrom(n) {
+	// Remove any attached edges.
+	for _, h := range g.HalfedgesFrom(x) {
 		g.RemoveEdge(h.Edge())
 	}
-	n.SetHalfedge(nil)
-
-	delete(g.nodes, n.ID())
-	if g.nextNodeID != 0 && n.ID() == g.nextNodeID {
+	g.Node(id).SetHalfedge(nil) // Avoid memory leaks.
+	delete(g.nodes, id)
+	if g.nextNodeID != 0 && id == g.nextNodeID {
 		g.nextNodeID--
 	}
-	g.freeNodes[n.ID()] = struct{}{}
+	g.freeNodes[id] = struct{}{}
 }
 
-// Edge e must be initialized so that its halfedges are paired as given by
-// Twin() method and connected to its end nodes.
-// Unlike graph.SetEdge, SetEdge returns error.
-func (g *Graph) SetEdge(e Edge) error {
-	if _, exists := g.edges[e.ID()]; exists {
-		return fmt.Errorf("dcel: edge ID collision: %d", e.ID())
-	}
-	from := e.From()
-	to := e.To()
-	if from.ID() == to.ID() {
-		return fmt.Errorf("dcel: trying to set a loop edge at node %d", from.ID())
-	}
-	if !g.Has(from) {
-		return fmt.Errorf("dcel: node %d not present", from.ID())
-	}
-	if !g.Has(to) {
-		return fmt.Errorf("dcel: node %d not present", to.ID())
+// setEdge adds a new edge between u and v and returns the halfedge from u to v.
+// If u or v are not in the graph, they are added.
+//
+// It is not exported because edges cannot be added individualy, they are added
+// only when adding faces.
+func (g *Graph) setEdge(x, y graph.Node) (Halfedge, error) {
+	if x.ID() == y.ID() {
+		panic(fmt.Sprintf("dcel: trying to set a loop edge at node %d", x.ID()))
 	}
 
-	h1, h2 := e.Halfedges()
-	if err := attach(h1); err != nil {
-		return err
-	}
-	if err := attach(h2); err != nil {
-		detach(h1)
-		return err
+	h := g.Halfedge(x, y)
+	if h != nil {
+		// Edge between x and y already exists, so return the halfedge.
+		return h, nil
 	}
 
-	g.edges[e.ID()] = e
-	delete(g.freeEdges, e.ID())
-	g.nextEdgeID = max(g.nextEdgeID, e.ID())
-	return nil
+	// Add any missing node.
+	if !g.Has(x) {
+		g.AddNode(x)
+	}
+	if !g.Has(y) {
+		g.AddNode(y)
+	}
+
+	// Allocate the edge, its two halfedges and connect them together.
+	h = g.newEdge(x.ID(), y.ID())
+
+	// Attach the edge to the graph.
+	if err := attach(h); err != nil {
+		return nil, err
+	}
+	if err := attach(h.Twin()); err != nil {
+		detach(h)
+		return nil, err
+	}
+
+	id := h.Edge().ID()
+	g.edges[id] = h.Edge()
+	delete(g.freeEdges, id)
+	g.nextEdgeID = max(g.nextEdgeID, id)
+
+	return h, nil
+}
+
+func (g *Graph) newEdge(uid, vid int) Halfedge {
+	h1 := g.items.NewHalfedge()
+	h2 := g.items.NewHalfedge()
+	e := g.items.NewEdge(g.newEdgeID())
+
+	h1.SetFrom(g.Node(uid))
+	h2.SetFrom(g.Node(vid))
+
+	h1.SetTwin(h2)
+	h2.SetTwin(h1)
+
+	h1.SetNext(h2)
+	h2.SetNext(h1)
+
+	h1.SetPrev(h2)
+	h2.SetPrev(h1)
+
+	h1.SetFace(nil)
+	h2.SetFace(nil)
+
+	h1.SetEdge(e)
+	h2.SetEdge(e)
+	e.SetHalfedges(h1, h2)
+
+	return h1
 }
 
 func attach(h Halfedge) error {
@@ -307,28 +315,34 @@ func attach(h Halfedge) error {
 	return nil
 }
 
-// RemoveEdge removes e and its adjacent faces from g.
-func (g *Graph) RemoveEdge(e Edge) {
-	if _, exists := g.edges[e.ID()]; !exists {
+// RemoveEdge removes the edge between e.From and e.To and its adjacent faces
+// from g.
+func (g *Graph) RemoveEdge(e graph.Edge) {
+	h := g.Halfedge(e.From(), e.To())
+	if h == nil {
+		// Nothing to do.
 		return
 	}
 
-	h1, h2 := e.Halfedges()
-	if h1.Face() != nil {
-		g.RemoveFace(h1.Face())
+	// Remove any adjacent faces.
+	if h.Face() != nil {
+		g.RemoveFace(h.Face())
 	}
-	if h2.Face() != nil {
-		g.RemoveFace(h2.Face())
+	if h.Twin().Face() != nil {
+		g.RemoveFace(h.Twin().Face())
 	}
 
-	detach(h1)
-	detach(h2)
+	// Detach both halfedges from their From nodes and update affected
+	// halfedges.
+	detach(h)
+	detach(h.Twin())
 
-	delete(g.edges, e.ID())
-	if g.nextEdgeID != 0 && e.ID() == g.nextEdgeID {
+	id := h.Edge().ID()
+	delete(g.edges, id)
+	if g.nextEdgeID != 0 && id == g.nextEdgeID {
 		g.nextEdgeID--
 	}
-	g.freeEdges[e.ID()] = struct{}{}
+	g.freeEdges[id] = struct{}{}
 }
 
 func detach(h Halfedge) {
@@ -355,72 +369,100 @@ func detach(h Halfedge) {
 	out.SetPrev(in)
 	in.SetNext(out)
 
+	// Avoid memory leaks.
+	// TODO(vladimir-ch): Consider having a pool of reusable Edges.
 	h.SetFrom(nil)
-	h.SetPrev(h.Twin())
-	h.Twin().SetNext(h)
+	h.SetTwin(nil)
+	h.SetNext(nil)
+	h.SetPrev(nil)
+	h.SetEdge(nil)
 }
 
-// SetFace reconnects given halfedges so that they form a loop and sets f's
-// halfedge to one of them.
-func (g *Graph) SetFace(f Face, halfedges ...Halfedge) error {
-	// Alternatively, this could take a slice of Nodes, but it seems more
-	// consistent to create graph entities from entities of one dimension less,
-	// i.e., edges from nodes, faces from edges. On the other hand, setting it
-	// from nodes and finding the halfedges automatically is more convenient
-	// (but also slower and the edges must be already set).
+// HasFace returns whether a face with the given id exists in the graph.
+func (g *Graph) HasFace(id int) bool {
+	_, exists := g.faces[id]
+	return exists
+}
 
-	// There must be at least three halfedges.
-	if len(halfedges) < 3 {
-		panic(fmt.Sprintf("dcel: cannot set a face %d from only %d halfedges", f.ID(), len(halfedges)))
+// AddFace adds a new face with given ID and with vertices given by nodes.
+// Any missing node or edge between two consecutive nodes will be added to the
+// graph first.
+//
+// If the nodes are not pair-wise distinct, if two consecutive nodes are
+// already connected by a halfedge with an adjacent Face, or if the existing
+// graph topology does not permit adding the face, an error will be returned.
+//
+// AddFace panics if a face with the given id already exists in the graph or if
+// the length of nodes is less than 3.
+func (g *Graph) AddFace(id int, nodes ...graph.Node) error {
+	if g.HasFace(id) {
+		panic(fmt.Sprintf("dcel: face ID collision: %d", id))
+	}
+	if len(nodes) < 3 {
+		panic(fmt.Sprintf("dcel: cannot add face %d with only %d nodes", id, len(nodes)))
 	}
 
-	// Check that the halfedges form a chain as given by their From nodes.
-	for i, h := range halfedges {
-		j := (i + 1) % len(halfedges)
-		if h.Twin().From() != halfedges[j].From() {
-			return fmt.Errorf("dcel: cannot set face %d, halfedges do not form a chain", f.ID())
-		}
-	}
-	// Check that they are all free.
-	for _, h := range halfedges {
-		if h.Face() != nil {
-			return fmt.Errorf("dcel: cannot set face %d, halfedge from %d to %d already has a face",
-				f.ID(), h.From().ID(), h.Twin().From().ID())
-		}
-	}
-
-	// Add any missing edges. If adding or the reconnection in the next step
-	// fail, we have already modified the graph.
-	for _, h := range halfedges {
-		if !g.HasEdge(h.Edge()) {
-			if err := g.SetEdge(h.Edge()); err != nil {
-				return err
+	// Check that the nodes are pair-wise distinct.
+	for i, x := range nodes {
+		for j := i + 1; j < len(nodes); j++ {
+			if x.ID() == nodes[j].ID() {
+				return fmt.Errorf("dcel: cannot add face %d, duplicit node %d", id, x.ID())
 			}
 		}
 	}
 
-	// The main action: reconnect the halfedges so the Next and Prev point to
-	// consecutive neighbors.
-	for i, h1 := range halfedges {
-		h2 := halfedges[(i+1)%len(halfedges)]
+	// Collect (and add any missing) halfedges between consecutive nodes.
+	// Absent nodes are added in setEdge().
+	var hedges []Halfedge
+	for i, x := range nodes {
+		y := nodes[(i+1)%len(nodes)]
+		h, err := g.setEdge(x, y)
+		if err != nil {
+			return err
+		}
+		if h.Face() != nil {
+			return fmt.Errorf("dcel: cannot add face %d, halfedge from %d to %d is not free",
+				id, x.ID(), y.ID())
+		}
+		hedges = append(hedges, h)
+	}
+
+	// Reconnect the halfedges so the Next and Prev point to consecutive
+	// neighbors.
+	for i, h1 := range hedges {
+		h2 := hedges[(i+1)%len(hedges)]
 		if err := reconnect(h1, h2); err != nil {
 			return err
 		}
 	}
 
-	g.faces[f.ID()] = f
-	delete(g.freeFaces, f.ID())
-	g.nextFaceID = max(g.nextFaceID, f.ID())
+	// Allocate new face and set its halfedge.
+	f := g.items.NewFace(id)
+	f.SetHalfedge(hedges[0])
+	// Set the face of adjacent halfedges.
+	for _, h := range hedges {
+		h.SetFace(f)
+	}
+
+	g.faces[id] = f
+	delete(g.freeFaces, id)
+	g.nextFaceID = max(g.nextFaceID, id)
+
 	return nil
 }
 
+// reconnect adjusts the halfedges around the shared node between in and out so
+// that in.Next() == out and out.Prev() == in.
+// It panics if in and out do not share a common node.
 func reconnect(in, out Halfedge) error {
-	// We know that in.Twin().From() == out.From().
+	if in.Twin().From() != out.From() {
+		panic("dcel.reconnect: halfedges are not connected")
+	}
 
-	if in.Next() == out {
-		if out.Prev() != in {
+	if in.Next() == out || out.Prev() == in {
+		if in.Next() != out || out.Prev() != in {
 			// This would be our bug.
-			panic(fmt.Sprintf("dcel: halfedges around node %d are inconsistently connected",
+			panic(fmt.Sprintf("dcel.reconnect: halfedges around node %d are inconsistently connected",
 				out.From().ID()))
 		}
 		// in and out are already adjacent.
@@ -441,7 +483,7 @@ func reconnect(in, out Halfedge) error {
 		}
 	}
 	if b == nil {
-		return fmt.Errorf("dcel: halfedge reconnection failed around node %d", out.From())
+		return fmt.Errorf("dcel: halfedge reconnection failed around node %d", out.From().ID())
 	}
 
 	// Reconnect the halfedges.
@@ -463,84 +505,144 @@ func reconnect(in, out Halfedge) error {
 
 // RemoveFace disconnects f from g and sets its Halfedge to nil.
 func (g *Graph) RemoveFace(f Face) {
-	if _, exists := g.faces[f.ID()]; !exists {
+	id := f.ID()
+	if _, exists := g.faces[id]; !exists {
+		// Nothing to do, a face with such id does not exist in the graph.
 		return
 	}
 
-	start := f.Halfedge()
-	if start != nil {
-		// Set the face of all adjacent halfedges to nil.
-		for iter := start; ; {
-			iter.SetFace(nil)
-			iter = iter.Next()
-			if iter == start {
-				break
-			}
-		}
+	// Disconnect the face from its adjacent halfedges.
+	for _, h := range g.HalfedgesAround(f) {
+		h.SetFace(nil)
 	}
 	f.SetHalfedge(nil)
 
-	delete(g.faces, f.ID())
-	if g.nextFaceID != 0 && f.ID() == g.nextFaceID {
+	delete(g.faces, id)
+	if g.nextFaceID != 0 && id == g.nextFaceID {
 		g.nextFaceID--
 	}
-	g.freeFaces[f.ID()] = struct{}{}
+	g.freeFaces[id] = struct{}{}
 }
 
-type Node interface {
-	ID() int
-	Halfedge() Halfedge
-	SetHalfedge(Halfedge)
+func (g *Graph) newEdgeID() int {
+	if g.nextEdgeID != maxInt {
+		id := g.nextEdgeID
+		g.nextEdgeID++
+		return id
+	}
+	// All edge IDs have already been used. See if at least one has been
+	// released.
+	for id := range g.freeEdges {
+		return id
+	}
+	if len(g.edges) == maxInt {
+		panic("dcel: graph too large")
+	}
+	// Resort to checking all positive integers to see if there is at least one
+	// unused.
+	for id := 0; id < maxInt; id++ {
+		if _, exists := g.edges[id]; !exists {
+			return id
+		}
+	}
+	panic("dcel: no free edge ID")
 }
 
-type Halfedge interface {
-	From() Node
-	SetFrom(Node)
-
-	Twin() Halfedge
-	SetTwin(Halfedge)
-
-	Next() Halfedge
-	SetNext(Halfedge)
-
-	// Holding a reference to the previous halfedge could be optional.
-	Prev() Halfedge
-	SetPrev(Halfedge)
-
-	Edge() Edge
-	SetEdge(Edge)
-
-	Face() Face
-	SetFace(Face)
+// NewFaceID returns a new face id unique within the graph.
+func (g *Graph) NewFaceID() int {
+	if g.nextFaceID != maxInt {
+		id := g.nextFaceID
+		g.nextFaceID++
+		return id
+	}
+	// All face IDs have already been used. See if at least one has been
+	// released.
+	for id := range g.freeFaces {
+		return id
+	}
+	if len(g.faces) == maxInt {
+		panic("dcel: graph too large")
+	}
+	// Resort to checking all positive integers to see if there is at least one
+	// unused.
+	for id := 0; id < maxInt; id++ {
+		if _, exists := g.faces[id]; !exists {
+			return id
+		}
+	}
+	panic("dcel: no free face ID")
 }
 
-type Edge interface {
-	ID() int
-	From() Node
-	To() Node
-	// Weight() float64
-
-	Halfedges() (Halfedge, Halfedge)
-	SetHalfedges(Halfedge, Halfedge)
+// HalfedgesFrom returns all halfedges whose From node is x.
+func (g *Graph) HalfedgesFrom(x graph.Node) []Halfedge {
+	u := g.Node(x.ID())
+	if u == nil {
+		// The node does not belong to the graph.
+		return nil
+	}
+	if u.Halfedge() == nil {
+		// The node is isolated.
+		return nil
+	}
+	var (
+		hedges []Halfedge
+		start  = u.Halfedge() // An outgoing halfedge from u.
+	)
+	for iter := start; ; {
+		hedges = append(hedges, iter)
+		iter = iter.Twin().Next()
+		if iter == start {
+			break
+		}
+	}
+	return hedges
 }
 
-func MakeEdge(e Edge, h1, h2 Halfedge) Edge {
-	e.SetHalfedges(h1, h2)
-	h1.SetTwin(h2)
-	h2.SetTwin(h1)
-	h1.SetEdge(e)
-	h2.SetEdge(e)
-	h1.SetNext(h2)
-	h2.SetNext(h1)
-	h1.SetPrev(h2)
-	h2.SetPrev(h1)
-	return e
+// HalfedgesTo returns all halfedges whose Twin.From node is x.
+func (g *Graph) HalfedgesTo(x graph.Node) []Halfedge {
+	u := g.Node(x.ID())
+	if u == nil {
+		// The node does not belong to the graph.
+		return nil
+	}
+	if u.Halfedge() == nil {
+		// The node is isolated.
+		return nil
+	}
+	var (
+		hedges []Halfedge
+		start  = u.Halfedge().Twin() // An incoming halfedge to u.
+	)
+	for iter := start; ; {
+		hedges = append(hedges, iter)
+		iter = iter.Next().Twin()
+		if iter == start {
+			break
+		}
+	}
+	return hedges
 }
 
-type Face interface {
-	ID() int
-	Halfedge() Halfedge
-	SetHalfedge(Halfedge)
+// HalfedgesAround returns all halfedges adjacent to the given face.
+func (g *Graph) HalfedgesAround(f Face) []Halfedge {
+	if _, exists := g.faces[f.ID()]; !exists {
+		return nil
+	}
+	if f.Halfedge() == nil {
+		return nil
+	}
+	var (
+		hedges []Halfedge
+		start  = f.Halfedge()
+	)
+	for iter := start; ; {
+		hedges = append(hedges, iter)
+		iter = iter.Next()
+		if iter == start {
+			break
+		}
+	}
+	return hedges
 }
 
 func max(a, b int) int {
