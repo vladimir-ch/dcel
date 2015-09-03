@@ -58,7 +58,7 @@ func (g *Graph) Face(id int) Face { return g.faces[id] }
 // the graph.
 // func (g *Graph) Edge(id int) Edge { return g.edges[id] }
 
-// Has returns whether the node n exists within the graph.
+// Has returns whether a node with the id given by x.ID() exists within the graph.
 func (g *Graph) Has(x graph.Node) bool {
 	return g.has(x.ID())
 }
