@@ -174,17 +174,23 @@ func (g *Graph) NewNodeID() int {
 	panic("dcel: no free node ID")
 }
 
-// AddNode adds a new, isolated node to the graph with ID given by x.ID(). It
-// panics if a node with this ID already exists in the graph.
-func (g *Graph) AddNode(x graph.Node) {
+// AddNode adds a new, isolated node to the graph with ID given by x.ID() and
+// returns it.
+// AddNode panics if a node with same ID already exists in the graph.
+func (g *Graph) AddNode(x graph.Node) Node {
 	id := x.ID()
 	if g.has(id) {
 		panic(fmt.Sprintf("dcel: node ID collision: %d", id))
 	}
 
-	g.nodes[id] = g.items.NewNode(id)
+	u := g.items.NewNode(id)
+	u.SetHalfedge(nil)
+
+	g.nodes[id] = u
 	delete(g.freeNodes, id)
 	g.nextNodeID = max(g.nextNodeID, id)
+
+	return u
 }
 
 // RemoveNode removes the node with ID given by x.ID() from the graph as well
@@ -195,11 +201,13 @@ func (g *Graph) RemoveNode(x graph.Node) {
 		// Nothing to do.
 		return
 	}
+
 	// Remove any attached edges.
 	for _, h := range g.HalfedgesFrom(x) {
 		g.RemoveEdge(h.Edge())
 	}
 	g.Node(id).SetHalfedge(nil) // Avoid memory leaks.
+
 	delete(g.nodes, id)
 	if g.nextNodeID != 0 && id == g.nextNodeID {
 		g.nextNodeID--
@@ -207,12 +215,15 @@ func (g *Graph) RemoveNode(x graph.Node) {
 	g.freeNodes[id] = struct{}{}
 }
 
-// setEdge adds a new edge between u and v and returns the halfedge from u to v.
-// If u or v are not in the graph, they are added.
+// addEdge adds a new edge between nodes identified by x.ID() and y.ID() and
+// returns its halfedge from x to y. If the nodes are not in the graph, they
+// are added.
+//
+// addEdge panics if x.ID() == y.ID().
 //
 // It is not exported because edges cannot be added individualy, they are added
 // only when adding faces.
-func (g *Graph) setEdge(x, y graph.Node) (Halfedge, error) {
+func (g *Graph) addEdge(x, y graph.Node) (Halfedge, error) {
 	if x.ID() == y.ID() {
 		panic(fmt.Sprintf("dcel: trying to set a loop edge at node %d", x.ID()))
 	}
@@ -224,40 +235,46 @@ func (g *Graph) setEdge(x, y graph.Node) (Halfedge, error) {
 	}
 
 	// Add any missing node.
+	var u, v Node
 	if !g.Has(x) {
-		g.AddNode(x)
+		u = g.AddNode(x)
+	} else {
+		u = g.Node(x.ID())
 	}
 	if !g.Has(y) {
-		g.AddNode(y)
+		v = g.AddNode(y)
+	} else {
+		v = g.Node(y.ID())
 	}
 
-	// Allocate the edge, its two halfedges and connect them together.
-	h = g.newEdge(x.ID(), y.ID())
-
-	// Attach the edge to the graph.
-	if err := attach(h); err != nil {
+	// Allocate a new edge and attach it to the graph.
+	e := g.newEdge()
+	h1, h2 := e.Halfedges()
+	if err := attach(h1, u); err != nil {
 		return nil, err
 	}
-	if err := attach(h.Twin()); err != nil {
-		detach(h)
+	if err := attach(h2, v); err != nil {
+		detach(h1)
 		return nil, err
 	}
 
-	id := h.Edge().ID()
-	g.edges[id] = h.Edge()
+	id := e.ID()
+	g.edges[id] = e
 	delete(g.freeEdges, id)
 	g.nextEdgeID = max(g.nextEdgeID, id)
 
-	return h, nil
+	return h1, nil
 }
 
-func (g *Graph) newEdge(uid, vid int) Halfedge {
+// newEdge allocates a new, properly initialized Edge not connected to any
+// node.
+func (g *Graph) newEdge() Edge {
 	h1 := g.items.NewHalfedge()
 	h2 := g.items.NewHalfedge()
 	e := g.items.NewEdge(g.newEdgeID())
 
-	h1.SetFrom(g.Node(uid))
-	h2.SetFrom(g.Node(vid))
+	h1.SetFrom(nil)
+	h2.SetFrom(nil)
 
 	h1.SetTwin(h2)
 	h2.SetTwin(h1)
@@ -275,14 +292,11 @@ func (g *Graph) newEdge(uid, vid int) Halfedge {
 	h2.SetEdge(e)
 	e.SetHalfedges(h1, h2)
 
-	return h1
+	return e
 }
 
-func attach(h Halfedge) error {
-	// h is already connected to its From node, but the node does not know
-	// about it, so change that.
-
-	u := h.From()
+func attach(h Halfedge, u Node) error {
+	h.SetFrom(u)
 	if u.Halfedge() == nil {
 		// From node is isolated.
 
@@ -293,7 +307,6 @@ func attach(h Halfedge) error {
 	}
 
 	// From node is not isolated, so we must update its neighboring halfedges.
-
 	// First find a free (i.e., without an adjacent face) halfedge from u.
 	out := u.Halfedge()
 	for {
@@ -312,11 +325,12 @@ func attach(h Halfedge) error {
 	h.SetPrev(in)
 	h.Twin().SetNext(out)
 	out.SetPrev(h.Twin())
+
 	return nil
 }
 
-// RemoveEdge removes the edge between e.From and e.To and its adjacent faces
-// from g.
+// RemoveEdge removes the edge between nodes identified by e.From and e.To and
+// its adjacent faces from g.
 func (g *Graph) RemoveEdge(e graph.Edge) {
 	h := g.Halfedge(e.From(), e.To())
 	if h == nil {
@@ -412,11 +426,11 @@ func (g *Graph) AddFace(id int, nodes ...graph.Node) error {
 	}
 
 	// Collect (and add any missing) halfedges between consecutive nodes.
-	// Absent nodes are added in setEdge().
+	// Absent nodes are added in addEdge().
 	var hedges []Halfedge
 	for i, x := range nodes {
 		y := nodes[(i+1)%len(nodes)]
-		h, err := g.setEdge(x, y)
+		h, err := g.addEdge(x, y)
 		if err != nil {
 			return err
 		}
