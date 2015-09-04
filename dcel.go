@@ -174,11 +174,9 @@ func (g *Graph) NewNodeID() int {
 	panic("dcel: no free node ID")
 }
 
-// AddNode adds a new, isolated node to the graph with ID given by x.ID() and
-// returns it.
-// AddNode panics if a node with same ID already exists in the graph.
-func (g *Graph) AddNode(x graph.Node) Node {
-	id := x.ID()
+// AddNode adds a new, isolated node with the given id to the graph and returns it.
+// AddNode panics if a node with same id already exists in the graph.
+func (g *Graph) AddNode(id int) Node {
 	if g.has(id) {
 		panic(fmt.Sprintf("dcel: node ID collision: %d", id))
 	}
@@ -237,12 +235,12 @@ func (g *Graph) addEdge(x, y graph.Node) (Halfedge, error) {
 	// Add any missing node.
 	var u, v Node
 	if !g.Has(x) {
-		u = g.AddNode(x)
+		u = g.AddNode(x.ID())
 	} else {
 		u = g.Node(x.ID())
 	}
 	if !g.Has(y) {
-		v = g.AddNode(y)
+		v = g.AddNode(y.ID())
 	} else {
 		v = g.Node(y.ID())
 	}
