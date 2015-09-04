@@ -14,6 +14,10 @@ type BaseNode struct {
 	h  Halfedge
 }
 
+func NewBaseNode(id int) *BaseNode {
+	return &BaseNode{id: id}
+}
+
 func (n *BaseNode) ID() int                { return n.id }
 func (n *BaseNode) Halfedge() Halfedge     { return n.h }
 func (n *BaseNode) SetHalfedge(h Halfedge) { n.h = h }
@@ -24,6 +28,10 @@ type BaseHalfedge struct {
 	next, prev Halfedge
 	edge       Edge
 	face       Face
+}
+
+func NewBaseHalfedge() *BaseHalfedge {
+	return &BaseHalfedge{}
 }
 
 func (h *BaseHalfedge) From() Node          { return h.from }
@@ -44,6 +52,10 @@ type BaseEdge struct {
 	h1, h2 Halfedge
 }
 
+func NewBaseEdge(id int) *BaseEdge {
+	return &BaseEdge{id: id}
+}
+
 func (e *BaseEdge) ID() int                         { return e.id }
 func (e *BaseEdge) From() graph.Node                { return e.h1.From() }
 func (e *BaseEdge) To() graph.Node                  { return e.h2.From() }
@@ -56,6 +68,10 @@ type BaseFace struct {
 	h  Halfedge
 }
 
+func NewBaseFace(id int) *BaseFace {
+	return &BaseFace{id: id}
+}
+
 func (f *BaseFace) ID() int                { return f.id }
 func (f *BaseFace) Halfedge() Halfedge     { return f.h }
 func (f *BaseFace) SetHalfedge(h Halfedge) { f.h = h }
@@ -64,7 +80,7 @@ func (f *BaseFace) SetHalfedge(h Halfedge) { f.h = h }
 // structure.
 type Base struct{}
 
-func (Base) NewNode(id int) Node   { return &BaseNode{id: id} }
-func (Base) NewHalfedge() Halfedge { return &BaseHalfedge{} }
-func (Base) NewEdge(id int) Edge   { return &BaseEdge{id: id} }
-func (Base) NewFace(id int) Face   { return &BaseFace{id: id} }
+func (Base) NewNode(id int) Node   { return NewBaseNode(id) }
+func (Base) NewHalfedge() Halfedge { return NewBaseHalfedge() }
+func (Base) NewEdge(id int) Edge   { return NewBaseEdge(id) }
+func (Base) NewFace(id int) Face   { return NewBaseFace(id) }
