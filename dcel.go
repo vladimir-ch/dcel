@@ -78,6 +78,24 @@ func (g *Graph) Nodes() []graph.Node {
 	return nodes
 }
 
+// Edges returns all the edges in the graph.
+func (g *Graph) Edges() []graph.Edge {
+	var edges []graph.Edge
+	for _, e := range g.edges {
+		edges = append(edges, e)
+	}
+	return edges
+}
+
+// Faces returns all the faces in the graph.
+func (g *Graph) Faces() []Face {
+	var faces []Face
+	for _, f := range g.faces {
+		faces = append(faces, f)
+	}
+	return faces
+}
+
 // From returns all neighbors of the node x.
 func (g *Graph) From(x graph.Node) []graph.Node {
 	u := g.Node(x.ID())
